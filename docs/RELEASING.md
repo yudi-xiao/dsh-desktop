@@ -41,9 +41,24 @@ pnpm --filter @dsh-desktop/desktop tauri signer generate -w ./.tauri-key
 - **私钥**（`.tauri-key`）绝不提交，作为 `TAURI_SIGNING_PRIVATE_KEY` secret 供 CI
   签名更新包使用；私钥密码作为 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。
 
-更新端点 `plugins.updater.endpoints` 指向发布 host 的 `latest.json`（当前指向
-本仓库的 GitHub Releases）。发布新版本时，用
-[tauri-cli 的 updater 支持](https://v2.tauri.app/plugin/updater/) 生成
-`latest.json` 并上传到 release assets。
+`tauri.conf.json` 里 `bundle.createUpdaterArtifacts: true` 让 Tauri 在构建时生成
+`.sig` 签名文件；`tauri-action` 据此自动生成 `latest.json` 并上传到 release
+assets（`includeUpdaterJson`/`uploadUpdaterJson` 默认开启）。二者缺一不可：
+没有 `createUpdaterArtifacts` 就不会有 `.sig`，`latest.json` 也就不会生成。
 
-> 若丢失私钥或密码，将无法为更新包签名，自动更新失效。
+更新端点 `plugins.updater.endpoints` 指向
+`https://github.com/<owner>/dsh-desktop/releases/latest/download/latest.json`。
+
+### 本地构建需要签名私钥
+
+因为 `createUpdaterArtifacts: true`，本地 `pnpm tauri build` 也必须提供私钥，
+否则报错 `A public key has been found, but no private key`：
+
+```sh
+export TAURI_SIGNING_PRIVATE_KEY="$(cat apps/desktop/.tauri-key)"
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<密码>"
+pnpm tauri build
+```
+
+> 若丢失私钥或密码，将无法为更新包签名，自动更新失效，需重新生成密钥对
+> 并更新 `pubkey`。

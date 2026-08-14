@@ -72,4 +72,5 @@ jobs:
           releaseBody: "See [CHANGELOG](./CHANGELOG.md) for details."
           releaseDraft: true
           prerelease: false
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}
