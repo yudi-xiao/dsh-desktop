@@ -1,0 +1,19 @@
+# Normalize line endings across platforms (Windows / macOS / Linux CI).
+* text=auto
+
+# Keep generated/source files with their native endings where it matters.
+*.sh text eol=lf
+*.mjs text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.rs text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+
+# Binary assets — never transform.
+*.png binary
+*.ico binary
+*.icns binary
+*.node binary
+*.exe binary
+*.dll binary

@@ -95,11 +95,13 @@ fn apply_permission_mode(cmd: &mut Command) {
 /// Resolution order:
 /// 1. `DSH_DESKTOP_DSH_CMD` (a full shell command) — for pointing the shell at
 ///    a checkout or a custom launcher during development.
-/// 2. Packaged layout — `resource_dir/vendor/runtime/<target>/node/` portable
+/// 2. Dev layout — the workspace `apps/runtime/dsh-web.mjs` under system Node,
+///    used when the workspace exists (a source checkout, so edits are picked up
+///    live). This is preferred over the packaged layout in dev.
+/// 3. Packaged layout — `resource_dir/vendor/runtime/<target>/node/` portable
 ///    Node running the closure extracted from `…/app.tar.gz` into the app data
-///    directory (Node handles long paths there; the archive keeps every bundled
-///    path short enough for the NSIS installer).
-/// 3. Dev layout — the workspace `apps/runtime/dsh-web.mjs` under system Node.
+///    directory. Used in a bundled app, where the compile-time workspace path
+///    no longer exists on the user's machine.
 fn resolve_harness_command(
     resource_dir: Option<&std::path::Path>,
     data_dir: Option<&std::path::Path>,
@@ -113,7 +115,14 @@ fn resolve_harness_command(
     }
 
     let node_name = if cfg!(windows) { "node.exe" } else { "node" };
+    let workspace_script = workspace_dsh_script();
 
+    // Dev layout: prefer the source checkout when present.
+    if workspace_script.exists() {
+        return (node_name.to_string(), vec![workspace_script.to_string_lossy().into_owned()]);
+    }
+
+    // Packaged layout: fall back to the bundled portable Node + closure.
     if let (Some(resource_dir), Some(data_dir)) = (resource_dir, data_dir) {
         let runtime = resource_dir
             .join("vendor")
@@ -130,18 +139,24 @@ fn resolve_harness_command(
         }
     }
 
+    // Last resort: system node + the workspace launcher path (spawn will fail
+    // loudly if it does not exist).
+    (node_name.to_string(), vec![workspace_script.to_string_lossy().into_owned()])
+}
+
+/// The workspace `apps/runtime/dsh-web.mjs` path derived from the compile-time
+/// manifest location.
+fn workspace_dsh_script() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")); // apps/desktop/src-tauri
     let workspace = manifest
         .parent()
         .and_then(|p| p.parent())
         .and_then(|p| p.parent())
         .expect("CARGO_MANIFEST_DIR must be <workspace>/apps/desktop/src-tauri");
-    let script = workspace
+    workspace
         .join("apps")
         .join("runtime")
-        .join("dsh-web.mjs");
-
-    (node_name.to_string(), vec![script.to_string_lossy().into_owned()])
+        .join("dsh-web.mjs")
 }
 
 /// Extracts the packaged `app.tar.gz` closure into the app data directory on
@@ -411,7 +426,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_harness_command_prefers_packaged_layout() {
+    fn extract_closure_unpacks_bundled_runtime() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let workspace = manifest
             .parent()
@@ -425,19 +440,20 @@ mod tests {
             .join("vendor")
             .join("runtime")
             .join(node_dist_dir());
-        let node_bin = runtime
-            .join("node")
-            .join(if cfg!(windows) { "node.exe" } else { "node" });
-        if !node_bin.exists() {
+        if !runtime.join("app.tar.gz").exists() {
             // Runtime not prepared in this environment; nothing to assert.
             return;
         }
-        let (program, args) = resolve_harness_command(
-            Some(&workspace),
-            Some(&std::env::temp_dir().join("dsh-desktop-test-runtime")),
-        );
-        assert_eq!(program, node_bin.to_string_lossy());
-        assert!(args[0].ends_with("dsh-web.mjs"));
+        let data_dir = std::env::temp_dir().join("dsh-desktop-extract-test");
+        let _ = std::fs::remove_dir_all(&data_dir);
+        let script = extract_closure(&runtime, &data_dir).expect("closure should extract");
+        assert!(script.exists(), "extracted dsh-web.mjs missing: {script:?}");
+        assert!(script.ends_with("dsh-web.mjs"));
+
+        // Second call must be idempotent (reuse the already-extracted closure).
+        let again = extract_closure(&runtime, &data_dir).expect("idempotent re-extract");
+        assert_eq!(script, again);
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 
     #[test]
