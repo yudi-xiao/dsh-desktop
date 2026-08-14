@@ -2,6 +2,14 @@
 
 把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）装进一个可安装、可扩展的跨平台桌面应用 —— 一个 Codex Desktop 的替代品。
 
+> 仓库：https://github.com/yudi-xiao/dsh-desktop
+>
+> ![CI](https://github.com/yudi-xiao/dsh-desktop/actions/workflows/build.yml/badge.svg)
+
+## 安装
+
+从 [Releases](https://github.com/yudi-xiao/dsh-desktop/releases/latest) 下载对应平台的安装包（Windows `.exe` / macOS `.dmg` / Linux `.AppImage`·`.deb`）。应用内置 portable Node 与 dsh closure，无需预装 Node。
+
 ## 架构（三层）
 
 dsh 是纯 Node/TypeScript 的插件化 agent harness（pnpm monorepo + 一切皆插件），插件在运行时按字符串包名 `import()` 第三方 npm 包，**只能在 Node 上运行**；`dsh web` 通过本地 loopback HTTP 伺服 React Web UI 并注入 `__DSH_BOOT__` 引导。因此桌面应用由三层组成：
