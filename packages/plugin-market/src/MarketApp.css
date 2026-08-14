@@ -1,0 +1,154 @@
+.market {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  color: #e6edf3;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.market-head h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.4rem;
+}
+
+.market-head p {
+  margin: 0;
+  color: #9198a1;
+  font-size: 0.9rem;
+}
+
+.search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 1rem 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #e6edf3;
+}
+
+.catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plugin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0;
+  border-bottom: 1px solid #21262d;
+}
+
+.plugin-meta {
+  min-width: 0;
+}
+
+.plugin-name {
+  font-weight: 600;
+}
+
+.plugin-cat,
+.plugin-repo {
+  margin-left: 0.5rem;
+  font-size: 0.75rem;
+  color: #9198a1;
+}
+
+.plugin-repo {
+  color: #58a6ff;
+}
+
+.plugin-desc {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: #9198a1;
+}
+
+.empty,
+.muted {
+  color: #9198a1;
+}
+
+.preview {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+}
+
+.preview h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.preview-grid h3 {
+  margin: 0 0 0.25rem;
+  font-size: 0.85rem;
+  color: #9198a1;
+}
+
+.preview-grid ul {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.85rem;
+}
+
+.patch-diff {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem;
+  background: #010409;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #21262d;
+  color: #e6edf3;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #30363d;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  background: #1f6feb;
+  border-color: #1f6feb;
+}
+
+.msg {
+  margin: 1rem 0 0;
+  font-size: 0.9rem;
+  color: #7ee787;
+}
+
+.msg.error {
+  color: #f85149;
+}

@@ -1,0 +1,41 @@
+# Node / pnpm
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+dist/
+dist-ssr/
+.vite/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+target/
+*.pdb
+
+# Tauri signing keys (never commit the private key)
+apps/desktop/.tauri-key
+apps/desktop/.tauri-key.pub
+
+# Portable runtime / packaging (generated, never committed)
+vendor/
+apps/runtime/node_modules/
+runtime/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# Reasonix workspace metadata
+.reasonix/
+
+# Build artifacts
+release/
+out/
