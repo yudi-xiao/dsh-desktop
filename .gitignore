@@ -19,7 +19,6 @@ apps/desktop/.tauri-key.pub
 # Portable runtime / packaging (generated, never committed)
 vendor/
 apps/runtime/node_modules/
-runtime/
 
 # Environment & secrets
 .env

@@ -16,6 +16,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["dsh"]
+      }
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM4NzEwNzM2MDA2OURBQUQKUldTdDJta0FOZ2R4eUdQVjFmTmVqd1M5cDJCMWRLeTgwdExPNmNKQXpSbys2S3lzTFhyWnc4a3YK",
       "endpoints": [

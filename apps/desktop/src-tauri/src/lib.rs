@@ -7,23 +7,24 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_deep_link::DeepLinkExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         // A second launch focuses the existing window instead of starting a
-        // second harness + server, and forwards dsh:// deep links.
-        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+        // second harness + server. Deep links are routed through the deep-link
+        // plugin: single-instance (registered first, with the `deep-link`
+        // feature) forwards dsh:// CLI arguments to it on Linux/Windows.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-            if let Some(url) = argv.iter().find(|a| a.starts_with("dsh://")) {
-                let _ = app.emit("deep-link", url.clone());
-            }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             plugins::marketplace_install,
@@ -68,6 +69,18 @@ pub fn run() {
             });
 
             build_tray(app)?;
+
+            // Deep-link handler: focus the main window and re-emit the dsh://
+            // URL as a `deep-link` event (frontend / dsh web UI may subscribe).
+            #[cfg(desktop)]
+            {
+                let app_handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    if let Some(url) = event.urls().first() {
+                        forward_deep_link(&app_handle, url);
+                    }
+                });
+            }
 
             let supervisor = HarnessSupervisor::new();
             supervisor.start(app.handle().clone());
@@ -157,6 +170,17 @@ fn open_external(url: &Url) {
     if matches!(url.scheme(), "http" | "https") {
         let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
     }
+}
+
+/// Focuses the main window and re-emits a dsh:// deep link so the frontend
+/// (or the dsh web UI) can act on it.
+fn forward_deep_link(app: &tauri::AppHandle, url: &Url) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    let _ = app.emit("deep-link", url.to_string());
 }
 
 #[cfg(test)]
