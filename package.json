@@ -11,7 +11,7 @@
   "scripts": {
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
-    "lint": "pnpm -r run lint",
+    "lint": "eslint apps/desktop/src packages/plugin-market/src",
     "dev": "pnpm --filter @dsh-desktop/desktop dev",
     "tauri": "pnpm --filter @dsh-desktop/desktop tauri"
   },
@@ -24,5 +24,9 @@
       "node-pty",
       "protobufjs"
     ]
+  },
+  "devDependencies": {
+    "eslint": "^10.8.1",
+    "typescript-eslint": "^8.67.0"
   }
 }
