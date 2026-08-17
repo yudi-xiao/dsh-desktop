@@ -1,3 +1,4 @@
+mod board;
 mod plugins;
 mod supervisor;
 
@@ -34,6 +35,8 @@ pub fn run() {
             plugins::marketplace_reset,
             plugins::marketplace_has_candidate,
             plugins::marketplace_has_previous,
+            board::board_list_workspaces,
+            board::board_open_path,
         ])
         .setup(|app| {
             // The main window is created in code so navigation can be filtered:
@@ -106,14 +109,30 @@ fn open_market_window(app: &tauri::AppHandle) {
         .build();
 }
 
+/// Opens (or focuses) the standalone project board window.
+fn open_board_window(app: &tauri::AppHandle) {
+    if let Some(existing) = app.get_webview_window("board") {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "board", WebviewUrl::App("board.html".into()))
+        .title("项目看板")
+        .inner_size(980.0, 720.0)
+        .min_inner_size(680.0, 480.0)
+        .center()
+        .build();
+}
+
 /// Creates the system tray with a native menu: show the main window, open the
 /// plugin marketplace, or quit (which kills the harness process tree first).
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let show = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
+    let board = MenuItemBuilder::with_id("board", "项目看板").build(app)?;
     let market = MenuItemBuilder::with_id("market", "打开插件市场").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&show, &market, &quit])
+        .items(&[&show, &board, &market, &quit])
         .build()?;
 
     let mut tray = TrayIconBuilder::with_id("main-tray")
@@ -126,6 +145,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                     let _ = window.set_focus();
                 }
             }
+            "board" => open_board_window(app),
             "market" => open_market_window(app),
             "quit" => {
                 app.state::<HarnessSupervisor>().shutdown();

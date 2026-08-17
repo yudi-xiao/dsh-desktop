@@ -30,6 +30,7 @@ export default defineConfig({
       input: {
         index: fileURLToPath(new URL("index.html", import.meta.url)),
         market: fileURLToPath(new URL("market.html", import.meta.url)),
+        board: fileURLToPath(new URL("board.html", import.meta.url)),
       },
     },
   },

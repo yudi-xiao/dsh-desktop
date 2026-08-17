@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for the main and marketplace windows",
-  "windows": ["main", "market"],
+  "windows": ["main", "market", "board"],
   "permissions": ["core:default"]
 }

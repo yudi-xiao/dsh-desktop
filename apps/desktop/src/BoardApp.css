@@ -1,0 +1,156 @@
+.board {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #e6edf3;
+  background: #010409;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.board-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.board-head h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.board-head p {
+  margin: 6px 0 0;
+  color: #8b949e;
+  font-size: 13px;
+}
+
+.refresh {
+  padding: 7px 14px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #e6edf3;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.refresh:hover {
+  background: #1f2630;
+}
+
+.board-error {
+  color: #ff7b72;
+  background: #2d1614;
+  border: 1px solid #6e2c24;
+  padding: 10px 12px;
+  border-radius: 6px;
+}
+
+.board-hint,
+.board-empty {
+  padding: 24px;
+  text-align: center;
+  color: #8b949e;
+}
+
+.board-empty .muted {
+  color: #6e7681;
+  font-size: 13px;
+}
+
+.board-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.card {
+  background: #0d1117;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.status-active {
+  color: #3fb950;
+  border-color: #238636;
+  background: rgba(63, 185, 80, 0.1);
+}
+
+.status-empty {
+  color: #8b949e;
+  border-color: #30363d;
+  background: rgba(139, 148, 158, 0.1);
+}
+
+.status-archived {
+  color: #d29922;
+  border-color: #9e6a03;
+  background: rgba(210, 153, 34, 0.1);
+}
+
+.card-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-path {
+  margin: 0;
+  color: #8b949e;
+  font-size: 12px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #6e7681;
+  font-size: 12px;
+}
+
+.card-actions {
+  margin-top: auto;
+}
+
+.card-actions button {
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px solid #30363d;
+  background: #161b22;
+  color: #e6edf3;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.card-actions button:hover {
+  background: #1f2630;
+}
