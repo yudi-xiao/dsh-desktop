@@ -63,6 +63,19 @@ pub fn board_open_path(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Focuses the main window (the dsh web UI) so the user can open the project
+/// there. Works without the dsh RPC gateway, which does not expose workspace
+/// switching over HTTP in the current developer-preview version.
+#[tauri::command]
+pub fn board_focus_main(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}
+
 /// Projects the workspace storage unit into an ordered card list.
 fn parse_workspaces(json: &serde_json::Value) -> Vec<WorkspaceCard> {
     let archived: HashSet<&str> = json

@@ -37,6 +37,7 @@ pub fn run() {
             plugins::marketplace_has_previous,
             board::board_list_workspaces,
             board::board_open_path,
+            board::board_focus_main,
         ])
         .setup(|app| {
             // The main window is created in code so navigation can be filtered:

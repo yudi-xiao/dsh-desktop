@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./BoardApp.css";
 
@@ -36,6 +36,7 @@ function formatDate(iso: string): string {
 export function BoardApp() {
   const [cards, setCards] = useState<WorkspaceCard[] | null>(null);
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -50,11 +51,34 @@ export function BoardApp() {
     refresh();
   }, [refresh]);
 
+  // Most recently updated first.
+  const sorted = useMemo(() => {
+    if (cards === null) return [];
+    return [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [cards]);
+
+  // Filter by title or path.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter(
+      (c) => c.title.toLowerCase().includes(q) || c.path.toLowerCase().includes(q),
+    );
+  }, [sorted, query]);
+
   const openPath = async (path: string) => {
     try {
       await invoke("board_open_path", { path });
     } catch (e) {
       setError(`打开目录失败：${e}`);
+    }
+  };
+
+  const openInDsh = async () => {
+    try {
+      await invoke("board_focus_main");
+    } catch (e) {
+      setError(`打开 dsh 失败：${e}`);
     }
   };
 
@@ -70,6 +94,14 @@ export function BoardApp() {
         </button>
       </header>
 
+      <input
+        className="board-search"
+        type="search"
+        placeholder="按项目名或路径过滤…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+
       {error && <p className="board-error">{error}</p>}
 
       {cards === null && !error && <p className="board-hint">正在加载…</p>}
@@ -81,9 +113,15 @@ export function BoardApp() {
         </div>
       )}
 
-      {cards !== null && cards.length > 0 && (
+      {cards !== null && cards.length > 0 && filtered.length === 0 && (
+        <div className="board-empty">
+          <p>没有匹配「{query}」的项目。</p>
+        </div>
+      )}
+
+      {filtered.length > 0 && (
         <ul className="board-grid">
-          {cards.map((c) => (
+          {filtered.map((c) => (
             <li key={c.id} className="card">
               <div className="card-top">
                 <span className={`status status-${c.status}`}>{STATUS_LABEL[c.status]}</span>
@@ -102,6 +140,7 @@ export function BoardApp() {
                 <span>更新于 {formatDate(c.updatedAt)}</span>
               </div>
               <div className="card-actions">
+                <button onClick={() => openInDsh()}>在 dsh 中打开</button>
                 <button onClick={() => openPath(c.path)}>打开目录</button>
               </div>
             </li>
