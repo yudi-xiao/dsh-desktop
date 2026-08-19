@@ -1,0 +1,24 @@
+[[permission]]
+identifier = "dsh-web-codex"
+description = "Allows the trusted loopback dsh Web UI to control the local Codex adapter."
+commands.allow = [
+  "codex_status",
+  "codex_status_cached",
+  "codex_configure",
+  "codex_login_chatgpt",
+  "codex_logout_chatgpt",
+  "backend_select",
+  "codex_usage_status",
+  "codex_usage_refresh",
+  "codex_model_catalog",
+  "codex_collaboration_mode_catalog",
+  "codex_session_poll",
+  "codex_session_index",
+  "codex_session_send",
+  "codex_session_interrupt",
+  "codex_session_goal_get",
+  "codex_session_goal_update",
+  "codex_session_goal_clear",
+  "codex_session_approve",
+  "codex_session_reset",
+]

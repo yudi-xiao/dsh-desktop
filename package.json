@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.1.0",
+  "version": "0.1.23",
   "private": true,
   "description": "Cross-platform desktop shell for DeepSeek Harness (dsh) — a Codex Desktop alternative",
   "type": "module",
@@ -12,7 +12,11 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint apps/desktop/src packages/plugin-market/src",
-    "dev": "pnpm --filter @dsh-desktop/desktop dev",
+    "dev": "pnpm --filter @dsh-desktop/desktop tauri dev",
+    "dev:web": "pnpm --filter @dsh-desktop/desktop dev",
+    "smoke:codex": "node scripts/smoke-codex-app-server.mjs",
+    "smoke:codex:pinned": "node scripts/smoke-codex-app-server.mjs --dlx",
+    "smoke:runtime:upgrade": "node scripts/smoke-runtime-upgrade.mjs",
     "tauri": "pnpm --filter @dsh-desktop/desktop tauri"
   },
   "pnpm": {

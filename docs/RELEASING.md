@@ -10,10 +10,11 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-## 代码签名与公证（可选，未配置时产物未签名）
+## 平台代码签名与公证
 
-签名证书由 GitHub Actions secrets 提供；缺失时 `tauri-action` 仍会产出未签名
-安装包（macOS Gatekeeper / Windows SmartScreen 会提示）。
+平台签名证书由 GitHub Actions secrets 提供。macOS 证书缺失时会产出未签名
+安装包，Gatekeeper 会提示。Windows Authenticode 代码签名当前尚未配置，
+`TAURI_SIGNING_PRIVATE_KEY` 仅用于 Tauri updater 产物签名，不能消除 SmartScreen 提示。
 
 ### macOS（签名 + notarize）
 
@@ -24,9 +25,9 @@ git push origin v0.1.0
 - `APPLE_SIGNING_IDENTITY` — 签名身份（如 `Developer ID Application: …`）
 - `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` — notarization 凭据
 
-### Windows（代码签名）
+### Tauri updater 产物签名（正式发布必须）
 
-- `TAURI_SIGNING_PRIVATE_KEY` — Tauri updater 签名私钥（`tauri signer generate`）
+- `TAURI_SIGNING_PRIVATE_KEY` — Tauri updater 签名私钥（`tauri signer generate`，用于所有发布平台）
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — 私钥密码
 
 ## 自动更新
@@ -49,16 +50,29 @@ assets（`includeUpdaterJson`/`uploadUpdaterJson` 默认开启）。二者缺一
 更新端点 `plugins.updater.endpoints` 指向
 `https://github.com/<owner>/dsh-desktop/releases/latest/download/latest.json`。
 
-### 本地构建需要签名私钥
+### 本地正式构建需要签名私钥
 
 因为 `createUpdaterArtifacts: true`，本地 `pnpm tauri build` 也必须提供私钥，
 否则报错 `A public key has been found, but no private key`：
+
+POSIX shell：
 
 ```sh
 export TAURI_SIGNING_PRIVATE_KEY="$(cat apps/desktop/.tauri-key)"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="<密码>"
 pnpm tauri build
 ```
+
+Windows PowerShell：
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath apps/desktop/.tauri-key -Raw
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<密码>"
+pnpm tauri build
+```
+
+普通分支和 Pull Request 的 CI 使用 `tauri.ci.conf.json` 关闭 updater 产物，
+因此不需要向非发布构建暴露签名私钥。
 
 > 若丢失私钥或密码，将无法为更新包签名，自动更新失效，需重新生成密钥对
 > 并更新 `pubkey`。

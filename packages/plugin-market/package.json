@@ -1,6 +1,6 @@
 {
   "name": "@dsh-desktop/plugin-market",
-  "version": "0.1.0",
+  "version": "0.1.21",
   "private": true,
   "description": "Plugin marketplace UI library (React components + contract types)",
   "type": "module",

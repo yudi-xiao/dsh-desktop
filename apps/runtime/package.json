@@ -1,6 +1,6 @@
 {
   "name": "@dsh-desktop/runtime",
-  "version": "0.1.0",
+  "version": "0.1.21",
   "private": true,
   "description": "Node backend assembly: pins @deepseek-ai/dsh and provides the dsh-web launcher",
   "type": "module",
@@ -11,6 +11,7 @@
     "start": "node dsh-web.mjs"
   },
   "dependencies": {
+    "@dsh-desktop/dsh-codex-usage": "workspace:*",
     "@deepseek-ai/dsh": "0.1.0-rc.6"
   }
 }

@@ -880,8 +880,10 @@ dependencies = [
 
 [[package]]
 name = "dsh-desktop"
-version = "0.1.0"
+version = "0.1.23"
 dependencies = [
+ "base64 0.22.1",
+ "chrono",
  "flate2",
  "libc",
  "serde",

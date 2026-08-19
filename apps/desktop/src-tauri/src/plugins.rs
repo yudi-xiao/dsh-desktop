@@ -13,6 +13,8 @@ use std::process::Command;
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
+use crate::{logging, platform::configure_background_command};
+
 use crate::supervisor::resolve_dsh_cli;
 
 const ACTIVE_PROFILE: &str = "web";
@@ -104,6 +106,7 @@ fn diff_text(a: &str, b: &str) -> String {
 fn run_dsh_plugin(app: &AppHandle, args: &[&str]) -> Result<String, String> {
     let (node, bin) = resolve_dsh_cli(app).ok_or("dsh CLI not found (runtime not prepared?)")?;
     let mut cmd = Command::new(&node);
+    configure_background_command(&mut cmd);
     cmd.arg(&bin).arg("plugin");
     for a in args {
         cmd.arg(a);
@@ -113,7 +116,9 @@ fn run_dsh_plugin(app: &AppHandle, args: &[&str]) -> Result<String, String> {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     if !output.status.success() {
-        return Err(format!("{stdout}\n{stderr}").trim().to_string());
+        let message = format!("{stdout}\n{stderr}").trim().to_string();
+        logging::error("plugins", &message);
+        return Err(message);
     }
     Ok(format!("{stdout}\n{stderr}").trim().to_string())
 }

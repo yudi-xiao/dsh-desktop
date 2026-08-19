@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the main and marketplace windows",
-  "windows": ["main", "market", "board"],
+  "description": "Default capability for application-owned pages",
+  "windows": ["main", "market", "board", "settings"],
   "permissions": ["core:default"]
 }
