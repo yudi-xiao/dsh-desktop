@@ -5,9 +5,12 @@
 // Run on each target OS before packaging (native modules are platform-specific):
 //   node scripts/prepare-runtime.mjs
 import {
+  cpSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  readFileSync,
+  readdirSync,
   rmSync,
   renameSync,
   writeFileSync,
@@ -95,16 +98,107 @@ function deployClosure(targetDir) {
   // layout produces paths long enough to exceed the Windows NSIS installer's
   // path limit. Hoisted installs keep real top-level directories instead of
   // symlinks into `.pnpm/<pkg>@<ver>/`, shortening the longest path.
-  copyFileSync(join(root, "apps/runtime/package.json"), join(appDir, "package.json"));
-  copyFileSync(join(root, "apps/runtime/dsh-web.mjs"), join(appDir, "dsh-web.mjs"));
-
-  const install = spawnSync(
-    "pnpm",
-    ["install", "--ignore-workspace", "--node-linker=hoisted"],
-    { cwd: appDir, stdio: "inherit", shell: process.platform === "win32" },
+  const runtimePackage = JSON.parse(
+    readFileSync(join(root, "apps/runtime/package.json"), "utf8"),
   );
+  const pinnedDshVersion = runtimePackage.dependencies["@deepseek-ai/dsh"];
+  const lockText = readFileSync(join(root, "pnpm-lock.yaml"), "utf8");
+  const escapedVersion = pinnedDshVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const packagePattern = new RegExp(
+    `^  '(@deepseek-ai/dsh(?:-[^@']+)?)@${escapedVersion}(?:\\([^']*\\))?':$`,
+    "gm",
+  );
+  const pinnedDshPackages = [...lockText.matchAll(packagePattern)].map((match) => match[1]);
+  if (pinnedDshPackages.length < 50) {
+    throw new Error(`could not derive the pinned dsh dependency set for ${pinnedDshVersion}`);
+  }
+  runtimePackage.pnpm = {
+    ...(runtimePackage.pnpm || {}),
+    overrides: Object.fromEntries(
+      [...new Set(pinnedDshPackages)].map((name) => [name, pinnedDshVersion]),
+    ),
+  };
+  runtimePackage.dependencies["@dsh-desktop/dsh-codex-usage"] =
+    "file:./plugins/dsh-codex-usage";
+  writeFileSync(
+    join(appDir, "package.json"),
+    `${JSON.stringify(runtimePackage, null, 2)}\n`,
+  );
+  copyFileSync(join(root, "apps/runtime/dsh-web.mjs"), join(appDir, "dsh-web.mjs"));
+  cpSync(
+    join(root, "packages/dsh-codex-usage"),
+    join(appDir, "plugins/dsh-codex-usage"),
+    { recursive: true },
+  );
+
+  // Do not inherit a developer machine's global `offline=true` setting. A
+  // release build may reuse the local store, but it must still be allowed to
+  // fetch any tarball that is not cached yet.
+  const installArgs = [
+    "install",
+    "--ignore-workspace",
+    "--node-linker=hoisted",
+    "--offline=false",
+  ];
+  // Windows CreateProcess cannot execute pnpm.cmd directly. Use a constant
+  // command string instead of shell:true, which is deprecated for argument
+  // arrays and can change their escaping semantics.
+  const install = process.platform === "win32"
+    ? spawnSync(
+        process.env.ComSpec || "cmd.exe",
+        ["/d", "/s", "/c", `pnpm ${installArgs.join(" ")}`],
+        { cwd: appDir, stdio: "inherit", shell: false },
+      )
+    : spawnSync("pnpm", installArgs, {
+        cwd: appDir,
+        stdio: "inherit",
+        shell: false,
+      });
   if (install.status !== 0) throw new Error(`pnpm install failed`);
+  patchPackagedDshProfileBoot(appDir);
   console.log("closure ready");
+}
+
+// dsh-app-boot supports an installation-owned base URL specifically for
+// closed packaged runtimes, but the current dsh CLI does not forward it. Give
+// the Cordis loader a stable base inside the bundled closure so bare plugin
+// imports do not depend on a persistent profile junction surviving upgrades.
+// Keep this patch strict: a future dsh layout change must fail the build rather
+// than silently reintroduce the installed-only startup failure.
+function patchPackagedDshProfileBoot(appDir) {
+  const dshLib = join(appDir, "node_modules", "@deepseek-ai", "dsh", "lib");
+  const candidates = readdirSync(dshLib)
+    .filter((name) => /^profile-boot-.*\.js$/.test(name))
+    .map((name) => join(dshLib, name));
+  const before = `\tconst ctx = await boot(NAME, rootConfig, structuredClone(allPatches(composed)), (hostCtx) => {
+\t\tapp.current = hostCtx;
+\t\thostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);
+\t\tprovideCmdline(hostCtx, {
+\t\t\targs: options.args,
+\t\t\texit: (code) => void shutdown.shutdown(code)
+\t\t});
+\t});`;
+  const after = `\tconst ctx = await boot(NAME, rootConfig, structuredClone(allPatches(composed)), (hostCtx) => {
+\t\tapp.current = hostCtx;
+\t\thostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);
+\t\tprovideCmdline(hostCtx, {
+\t\t\targs: options.args,
+\t\t\texit: (code) => void shutdown.shutdown(code)
+\t\t});
+\t}, new URL("../", import.meta.url).href);`;
+  const matches = [];
+  for (const candidate of candidates) {
+    const source = readFileSync(candidate, "utf8");
+    if (source.includes(before)) matches.push({ candidate, source });
+  }
+  if (matches.length !== 1) {
+    throw new Error(
+      `expected exactly one dsh profile boot site, found ${matches.length}`,
+    );
+  }
+  const [{ candidate, source }] = matches;
+  writeFileSync(candidate, source.replace(before, after));
+  console.log(`patched packaged dsh loader base: ${candidate}`);
 }
 
 // Archives the closure into a single `app.tar.gz` and removes the directory.

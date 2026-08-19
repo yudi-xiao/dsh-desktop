@@ -115,7 +115,8 @@ fn parse_workspaces(json: &serde_json::Value) -> Vec<WorkspaceCard> {
                 .unwrap_or_default();
 
             let session_count = session_ids.len();
-            let archived_session_count = session_ids.iter().filter(|s| archived.contains(*s)).count();
+            let archived_session_count =
+                session_ids.iter().filter(|s| archived.contains(*s)).count();
             let status = if session_count == 0 {
                 "empty"
             } else if archived_session_count == session_count {

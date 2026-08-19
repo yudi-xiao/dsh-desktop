@@ -1,0 +1,5 @@
+# First-party desktop integration. The host half serves a sanitized snapshot
+# and the browser half occupies dsh's documented sidebar/settings slots.
+- insert:
+    - id: desktop-codex-usage
+      name: '@dsh-desktop/dsh-codex-usage'

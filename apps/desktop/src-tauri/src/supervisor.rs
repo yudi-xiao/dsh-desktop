@@ -17,6 +17,8 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::{logging, platform::configure_background_command};
+
 const READINESS_PREFIX: &str = "dsh web: ";
 const INITIAL_BACKOFF_SECS: u64 = 1;
 const MAX_BACKOFF_SECS: u64 = 30;
@@ -82,10 +84,11 @@ impl HarnessSupervisor {
 fn apply_permission_mode(cmd: &mut Command) {
     if cfg!(windows) && std::env::var("DSH_PERMISSION_MODE").is_err() {
         cmd.env("DSH_PERMISSION_MODE", "danger-full-access");
-        eprintln!(
-            "[supervisor] Windows has no harness confinement backend; \
-             falling back to DSH_PERMISSION_MODE=danger-full-access \
-             (approval prompts disabled). Set DSH_PERMISSION_MODE explicitly to override."
+        logging::warn(
+            "supervisor",
+            "Windows has no harness confinement backend; falling back to \
+             DSH_PERMISSION_MODE=danger-full-access (approval prompts disabled). \
+             Set DSH_PERMISSION_MODE explicitly to override.",
         );
     }
 }
@@ -117,9 +120,16 @@ fn resolve_harness_command(
     let node_name = if cfg!(windows) { "node.exe" } else { "node" };
     let workspace_script = workspace_dsh_script();
 
-    // Dev layout: prefer the source checkout when present.
-    if workspace_script.exists() {
-        return (node_name.to_string(), vec![workspace_script.to_string_lossy().into_owned()]);
+    // Dev layout is valid only for debug binaries. A release binary retains
+    // its compile-time CARGO_MANIFEST_DIR; on a developer machine that source
+    // path may still exist even after installing the MSI. Treating existence
+    // alone as a dev-mode signal makes the installed app run the source
+    // launcher without its deployed node_modules instead of bundled runtime.
+    if should_use_workspace_layout(cfg!(debug_assertions), workspace_script.exists()) {
+        return (
+            node_name.to_string(),
+            vec![workspace_script.to_string_lossy().into_owned()],
+        );
     }
 
     // Packaged layout: fall back to the bundled portable Node + closure.
@@ -141,60 +151,245 @@ fn resolve_harness_command(
 
     // Last resort: system node + the workspace launcher path (spawn will fail
     // loudly if it does not exist).
-    (node_name.to_string(), vec![workspace_script.to_string_lossy().into_owned()])
+    (
+        node_name.to_string(),
+        vec![workspace_script.to_string_lossy().into_owned()],
+    )
+}
+
+fn should_use_workspace_layout(debug_build: bool, workspace_exists: bool) -> bool {
+    debug_build && workspace_exists
 }
 
 /// The workspace `apps/runtime/dsh-web.mjs` path derived from the compile-time
 /// manifest location.
 fn workspace_dsh_script() -> PathBuf {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")); // apps/desktop/src-tauri
-    let workspace = manifest
-        .parent()
-        .and_then(|p| p.parent())
-        .and_then(|p| p.parent())
-        .expect("CARGO_MANIFEST_DIR must be <workspace>/apps/desktop/src-tauri");
-    workspace
+    workspace_root()
         .join("apps")
         .join("runtime")
         .join("dsh-web.mjs")
 }
 
+fn workspace_root() -> PathBuf {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")); // apps/desktop/src-tauri
+    manifest
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .expect("CARGO_MANIFEST_DIR must be <workspace>/apps/desktop/src-tauri")
+        .to_path_buf()
+}
+
 /// Extracts the packaged `app.tar.gz` closure into the app data directory on
-/// first launch and returns the path to `dsh-web.mjs`. Extraction is idempotent:
-/// an already-extracted closure is reused.
-fn extract_closure(runtime: &std::path::Path, data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+/// first launch and returns the path to `dsh-web.mjs`. The target includes an
+/// archive fingerprint: repeated starts reuse it, while an application update
+/// cannot accidentally keep running the previous closure.
+fn extract_closure(
+    runtime: &std::path::Path,
+    data_dir: &std::path::Path,
+) -> Option<std::path::PathBuf> {
     let archive = runtime.join("app.tar.gz");
     if !archive.exists() {
         return None;
     }
 
-    let target = data_dir.join("runtime").join(node_dist_dir());
+    match extract_closure_inner(&archive, data_dir) {
+        Ok(script) => Some(script),
+        Err(error) => {
+            logging::error(
+                "supervisor",
+                format!("failed to prepare bundled runtime: {error}"),
+            );
+            None
+        }
+    }
+}
+
+fn extract_closure_inner(
+    archive: &std::path::Path,
+    data_dir: &std::path::Path,
+) -> std::io::Result<std::path::PathBuf> {
+    let metadata = std::fs::metadata(archive)?;
+    let modified = metadata
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let fingerprint = format!("{:x}-{:x}", metadata.len(), modified);
+    let parent = data_dir.join("runtime").join(node_dist_dir());
+    let target = parent.join(&fingerprint);
     let script = target.join("dsh-web.mjs");
-    if script.exists() {
-        return Some(script);
+    if closure_is_complete(&target) {
+        return Ok(script);
     }
 
-    std::fs::create_dir_all(&target).ok()?;
-    eprintln!("[supervisor] extracting runtime closure to {}", target.display());
+    std::fs::create_dir_all(&parent)?;
+    remove_incomplete_runtime(&target)?;
+    let staging = parent.join(format!("{fingerprint}.extracting-{}", std::process::id()));
+    remove_incomplete_runtime(&staging)?;
+    std::fs::create_dir_all(&staging)?;
+    logging::info(
+        "supervisor",
+        format!("extracting runtime closure to {}", staging.display()),
+    );
 
     // Pure-Rust extraction (flate2 + tar) avoids depending on the system `tar`,
     // whose flavor differs across platforms (GNU vs bsdtar) and misparses
     // Windows drive-letter paths.
-    let file = std::fs::File::open(&archive).ok()?;
+    let file = std::fs::File::open(archive)?;
     let decoder = flate2::read::GzDecoder::new(file);
     let mut tar = tar::Archive::new(decoder);
-    tar.unpack(&target).ok()?;
+    tar.unpack(&staging)?;
 
-    if script.exists() {
-        Some(script)
+    if !closure_payload_exists(&staging) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "runtime archive is missing dsh-web.mjs or @deepseek-ai/dsh/lib/bin.js",
+        ));
+    }
+    // The marker is written inside staging before the atomic directory rename,
+    // so a crash can never make a partial target look reusable.
+    std::fs::write(staging.join(".complete"), b"dsh-desktop-runtime-v1\n")?;
+    std::fs::rename(&staging, &target)?;
+    Ok(script)
+}
+
+fn closure_payload_exists(root: &std::path::Path) -> bool {
+    root.join("dsh-web.mjs").is_file()
+        && root
+            .join("node_modules")
+            .join("@deepseek-ai")
+            .join("dsh")
+            .join("lib")
+            .join("bin.js")
+            .is_file()
+}
+
+fn closure_is_complete(root: &std::path::Path) -> bool {
+    root.join(".complete").is_file() && closure_payload_exists(root)
+}
+
+fn remove_incomplete_runtime(path: &std::path::Path) -> std::io::Result<()> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        std::fs::remove_dir_all(path)
     } else {
-        None
+        std::fs::remove_file(path)
+    }
+}
+
+/// Removes only generated profile links left by a debug build of this exact
+/// source checkout. They can leak into the persistent DSH_HOME and make an MSI
+/// boot race against packages outside its bundled runtime. User-installed
+/// plugin links point elsewhere and are deliberately preserved.
+fn prune_workspace_profile_links(data_dir: &std::path::Path) -> std::io::Result<usize> {
+    if cfg!(debug_assertions) {
+        return Ok(0);
+    }
+    let cache = data_dir.join("dsh").join("profiles").join("node_modules");
+    let workspace_modules = workspace_root().join("node_modules");
+    let mut removed = 0;
+    for entry in read_dir_if_exists(&cache)? {
+        let path = entry.path();
+        if remove_workspace_link(&path, &workspace_modules)? {
+            removed += 1;
+            continue;
+        }
+        // npm scopes such as @types and @deepseek-ai are real directories
+        // containing one junction per package.
+        if entry.file_type()?.is_dir() && entry.file_name().to_string_lossy().starts_with('@') {
+            for scoped in read_dir_if_exists(&path)? {
+                if remove_workspace_link(&scoped.path(), &workspace_modules)? {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    Ok(removed)
+}
+
+fn read_dir_if_exists(path: &std::path::Path) -> std::io::Result<Vec<std::fs::DirEntry>> {
+    match std::fs::read_dir(path) {
+        Ok(entries) => entries.collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_workspace_link(
+    path: &std::path::Path,
+    workspace_modules: &std::path::Path,
+) -> std::io::Result<bool> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata_is_link(&metadata) {
+        return Ok(false);
+    }
+    let raw_target = std::fs::read_link(path)?;
+    let target = if raw_target.is_absolute() {
+        raw_target
+    } else {
+        path.parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .join(raw_target)
+    };
+    if !path_is_within(&target, workspace_modules) {
+        return Ok(false);
+    }
+
+    #[cfg(windows)]
+    std::fs::remove_dir(path)?;
+    #[cfg(not(windows))]
+    std::fs::remove_file(path)?;
+    logging::info(
+        "supervisor",
+        format!("removed stale development profile link {}", path.display()),
+    );
+    Ok(true)
+}
+
+fn metadata_is_link(metadata: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
+fn path_is_within(path: &std::path::Path, root: &std::path::Path) -> bool {
+    #[cfg(windows)]
+    {
+        let normalize = |value: &std::path::Path| {
+            value
+                .to_string_lossy()
+                .trim_start_matches(r"\\?\")
+                .replace('/', "\\")
+                .to_ascii_lowercase()
+        };
+        let path = normalize(path);
+        let mut root = normalize(root);
+        if !root.ends_with('\\') {
+            root.push('\\');
+        }
+        path.starts_with(&root)
+    }
+    #[cfg(not(windows))]
+    {
+        path.starts_with(root)
     }
 }
 
 /// Node distribution directory name for this build target (matches the naming
 /// in `scripts/prepare-runtime.mjs`).
-fn node_dist_dir() -> &'static str {
+pub(crate) fn node_dist_dir() -> &'static str {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("windows", "x86_64") => "win-x64",
         ("macos", "x86_64") => "darwin-x64",
@@ -240,13 +435,36 @@ fn supervise_loop(
 
         let resource_dir = app.path().resource_dir().ok();
         let data_dir = app.path().app_data_dir().ok();
+        if let Some(data_dir) = &data_dir {
+            match prune_workspace_profile_links(data_dir) {
+                Ok(removed) if removed > 0 => logging::info(
+                    "supervisor",
+                    format!("removed {removed} stale development profile links"),
+                ),
+                Ok(_) => {}
+                Err(error) => logging::warn(
+                    "supervisor",
+                    format!("could not repair development profile links: {error}"),
+                ),
+            }
+        }
         let (program, args) = resolve_harness_command(resource_dir.as_deref(), data_dir.as_deref());
+        logging::info("supervisor", format!("starting harness with {program}"));
         let mut cmd = Command::new(&program);
-        cmd.args(&args).stdout(Stdio::piped()).stderr(Stdio::inherit());
+        configure_background_command(&mut cmd);
+        cmd.args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         // Pin DSH_HOME to the app data directory so the agent runtime and the
         // plugin manager share one profile set (and upgrades never touch it).
         if let Some(data_dir) = &data_dir {
             cmd.env("DSH_HOME", data_dir.join("dsh"));
+            // The dsh-side desktop plugin reads only this sanitized snapshot;
+            // OAuth credentials and raw app-server traffic stay in Rust.
+            cmd.env(
+                "DSH_DESKTOP_CODEX_USAGE_FILE",
+                data_dir.join("codex-usage.json"),
+            );
         }
         apply_permission_mode(&mut cmd);
         #[cfg(unix)]
@@ -258,7 +476,7 @@ fn supervise_loop(
         let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
-                eprintln!("[supervisor] failed to spawn {program}: {err}");
+                logging::error("supervisor", format!("failed to spawn {program}: {err}"));
                 emit_error(&app, &format!("failed to spawn harness: {err}"));
                 sleep_backoff(&shutdown, backoff);
                 backoff = (backoff * 2).min(MAX_BACKOFF_SECS);
@@ -266,6 +484,13 @@ fn supervise_loop(
             }
         };
         *child_pid.lock().unwrap() = Some(child.id());
+        if let Some(stderr) = child.stderr.take() {
+            thread::spawn(move || {
+                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                    logging::warn("dsh", line);
+                }
+            });
+        }
 
         let ready = wait_until_ready(&mut child);
 
@@ -278,19 +503,25 @@ fn supervise_loop(
 
                 let status = child.wait();
                 *url.lock().unwrap() = None;
-                eprintln!("[supervisor] harness exited: {status:?}");
+                logging::warn("supervisor", format!("harness exited: {status:?}"));
                 emit_stopped(&app);
             }
             Ok(None) => {
                 // Exited before reporting ready; reap and retry.
                 kill_process_tree(child.id());
-                let _ = child.wait();
-                eprintln!("[supervisor] harness exited before ready");
+                let status = child.wait();
+                let message = format!(
+                    "harness exited before ready ({status:?}); see the app-data logs directory"
+                );
+                logging::error("supervisor", &message);
+                emit_error(&app, &message);
             }
             Err(err) => {
                 kill_process_tree(child.id());
                 let _ = child.wait();
-                eprintln!("[supervisor] error reading harness output: {err}");
+                let message = format!("error reading harness output: {err}");
+                logging::error("supervisor", &message);
+                emit_error(&app, &message);
             }
         }
 
@@ -319,7 +550,7 @@ fn wait_until_ready(child: &mut Child) -> std::io::Result<Option<String>> {
                     if let Some(url) = line.strip_prefix(READINESS_PREFIX) {
                         let _ = tx.send(ChildEvent::Ready(url.trim().to_string()));
                     } else {
-                        println!("[dsh] {line}");
+                        logging::info("dsh", line);
                     }
                 }
                 Err(_) => break,
@@ -338,7 +569,7 @@ fn wait_until_ready(child: &mut Child) -> std::io::Result<Option<String>> {
 }
 
 fn emit_ready(app: &AppHandle, url: &str) {
-    println!("[supervisor] harness ready at {url}");
+    logging::info("supervisor", format!("harness ready at {url}"));
     let _ = app.emit("harness-ready", url.to_string());
 }
 
@@ -349,10 +580,13 @@ fn navigate_main_window(app: &AppHandle, url: &str) {
         match tauri::Url::parse(url) {
             Ok(parsed) => {
                 if let Err(err) = window.navigate(parsed) {
-                    eprintln!("[supervisor] failed to navigate main window: {err}");
+                    logging::error(
+                        "supervisor",
+                        format!("failed to navigate main window: {err}"),
+                    );
                 }
             }
-            Err(err) => eprintln!("[supervisor] invalid harness URL {url}: {err}"),
+            Err(err) => logging::error("supervisor", format!("invalid harness URL {url}: {err}")),
         }
     }
 }
@@ -374,7 +608,9 @@ fn emit_error(app: &AppHandle, message: &str) {
 fn kill_process_tree(pid: u32) {
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
+        let mut command = Command::new("taskkill");
+        configure_background_command(&mut command);
+        let _ = command
             .args(["/T", "/F", "/PID", &pid.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -426,6 +662,29 @@ mod tests {
     }
 
     #[test]
+    fn release_build_never_selects_workspace_layout() {
+        assert!(should_use_workspace_layout(true, true));
+        assert!(!should_use_workspace_layout(false, true));
+        assert!(!should_use_workspace_layout(true, false));
+    }
+
+    #[test]
+    fn workspace_link_target_matching_respects_path_boundaries() {
+        let root = workspace_root().join("node_modules");
+        assert!(path_is_within(&root.join(".pnpm").join("react"), &root));
+        assert!(!path_is_within(
+            &workspace_root()
+                .join("node_modules-elsewhere")
+                .join("react"),
+            &root
+        ));
+        assert!(!path_is_within(
+            &PathBuf::from("C:/another-project/node_modules/react"),
+            &root
+        ));
+    }
+
+    #[test]
     fn extract_closure_unpacks_bundled_runtime() {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let workspace = manifest
@@ -449,6 +708,7 @@ mod tests {
         let script = extract_closure(&runtime, &data_dir).expect("closure should extract");
         assert!(script.exists(), "extracted dsh-web.mjs missing: {script:?}");
         assert!(script.ends_with("dsh-web.mjs"));
+        assert!(closure_is_complete(script.parent().unwrap()));
 
         // Second call must be idempotent (reuse the already-extracted closure).
         let again = extract_closure(&runtime, &data_dir).expect("idempotent re-extract");
@@ -502,11 +762,13 @@ mod tests {
 
         let ready = wait_until_ready(&mut child).expect("reading harness stdout");
         let url = ready.expect("dsh web must report readiness before EOF");
-        assert!(url.starts_with("http://127.0.0.1:"), "unexpected origin {url}");
+        assert!(
+            url.starts_with("http://127.0.0.1:"),
+            "unexpected origin {url}"
+        );
 
         // Kill the whole tree so the nested dsh bin.js does not orphan.
         kill_process_tree(child.id());
         let _ = child.wait();
     }
 }
-

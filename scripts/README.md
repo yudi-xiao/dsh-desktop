@@ -5,7 +5,9 @@
 | 脚本 | 用途 |
 | --- | --- |
 | `prepare-runtime.mjs` | 下载 portable Node + hoisted 安装 dsh closure + 归档 `app.tar.gz` 到 `vendor/runtime/<target>/` |
-| `smoke-runtime.mjs` | 启动 `dsh web` → 等待 readiness → 校验 HTTP 200 → 干净退出（升级后/CI 冒烟） |
+| `smoke-runtime.mjs` | 启动 `dsh web` → 校验 origin、Codex 用量/session adapter UI bundle 和只读用量接口 → 稳定运行 10 秒后干净退出 |
+| `smoke-runtime-upgrade.mjs` | 复用同一个 `DSH_HOME` 连续冒烟两次，覆盖安装升级后的持久化 Profile 与插件目录 |
+| `smoke-codex-app-server.mjs` | 启动 Codex app-server → 验证 initialize + account/read；ChatGPT 已登录时再验证只读 rate limits/可选 usage；`--dlx` 验证精确锁定版本（不登录、不启动 turn） |
 | `check-dsh-version.mjs` | 对比 pinned 与 npm latest 的 `@deepseek-ai/dsh` 版本 |
 | `gen-icon.mjs` | 从源图生成占位应用图标（`tauri icon` 前体） |
 

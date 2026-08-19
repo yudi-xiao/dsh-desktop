@@ -49,7 +49,9 @@ jobs:
       - name: Build installers (release)
         env:
           CARGO_BUILD_JOBS: 2
-        run: pnpm --filter @dsh-desktop/desktop tauri build
+        # Pull-request and branch builds validate installers without producing
+        # signed updater artifacts, so they do not need release-only secrets.
+        run: pnpm --filter @dsh-desktop/desktop tauri build --config src-tauri/tauri.ci.conf.json
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4

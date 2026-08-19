@@ -1,7 +1,12 @@
 mod board;
+mod codex;
+mod codex_usage;
+mod logging;
+mod platform;
 mod plugins;
 mod supervisor;
 
+use codex::CodexManager;
 use supervisor::HarnessSupervisor;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -38,29 +43,51 @@ pub fn run() {
             board::board_list_workspaces,
             board::board_open_path,
             board::board_focus_main,
+            codex::codex_status,
+            codex::codex_status_cached,
+            codex::codex_configure,
+            codex::codex_login_chatgpt,
+            codex::codex_logout_chatgpt,
+            codex::backend_select,
+            codex::codex_usage_status,
+            codex::codex_usage_refresh,
+            codex::codex_session_poll,
+            codex::codex_session_index,
+            codex::codex_model_catalog,
+            codex::codex_collaboration_mode_catalog,
+            codex::codex_session_send,
+            codex::codex_session_interrupt,
+            codex::codex_session_goal_get,
+            codex::codex_session_goal_update,
+            codex::codex_session_goal_clear,
+            codex::codex_session_approve,
+            codex::codex_session_reset,
         ])
         .setup(|app| {
+            let app_data_dir = app.path().app_data_dir()?;
+            logging::init(&app_data_dir)?;
             // The main window is created in code so navigation can be filtered:
             // only the local connecting page and the dsh loopback origin may
             // load in-app; every other http(s) URL opens in the system browser.
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("DSH Desktop")
-                .inner_size(1280.0, 820.0)
-                .min_inner_size(900.0, 600.0)
-                .center()
-                .on_navigation(|url| {
-                    if is_allowed_navigation(url) {
-                        true
-                    } else {
-                        open_external(url);
-                        false
-                    }
-                })
-                .on_new_window(|url, _features| {
-                    open_external(&url);
-                    tauri::webview::NewWindowResponse::Deny
-                })
-                .build()?;
+            let window =
+                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                    .title("DSH Desktop")
+                    .inner_size(1280.0, 820.0)
+                    .min_inner_size(900.0, 600.0)
+                    .center()
+                    .on_navigation(|url| {
+                        if is_allowed_navigation(url) {
+                            true
+                        } else {
+                            open_external(url);
+                            false
+                        }
+                    })
+                    .on_new_window(|url, _features| {
+                        open_external(&url);
+                        tauri::webview::NewWindowResponse::Deny
+                    })
+                    .build()?;
 
             // Closing the window hides it to the tray; only the tray Quit
             // terminates the harness and exits.
@@ -89,6 +116,11 @@ pub fn run() {
             let supervisor = HarnessSupervisor::new();
             supervisor.start(app.handle().clone());
             app.manage(supervisor);
+
+            let codex = CodexManager::new();
+            codex.load(app.handle());
+            codex.bootstrap_if_selected(app.handle().clone());
+            app.manage(codex);
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -125,15 +157,31 @@ fn open_board_window(app: &tauri::AppHandle) {
         .build();
 }
 
+/// Opens (or focuses) the recovery-only backend configuration window.
+fn open_settings_window(app: &tauri::AppHandle) {
+    if let Some(existing) = app.get_webview_window("settings") {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
+        .title("后端设置（故障恢复）")
+        .inner_size(760.0, 680.0)
+        .min_inner_size(620.0, 520.0)
+        .center()
+        .build();
+}
+
 /// Creates the system tray with a native menu: show the main window, open the
 /// plugin marketplace, or quit (which kills the harness process tree first).
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let show = MenuItemBuilder::with_id("show", "显示主窗口").build(app)?;
     let board = MenuItemBuilder::with_id("board", "项目看板").build(app)?;
     let market = MenuItemBuilder::with_id("market", "打开插件市场").build(app)?;
+    let settings = MenuItemBuilder::with_id("settings", "后端设置（故障恢复）").build(app)?;
     let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
     let menu = MenuBuilder::new(app)
-        .items(&[&show, &board, &market, &quit])
+        .items(&[&show, &board, &market, &settings, &quit])
         .build()?;
 
     let mut tray = TrayIconBuilder::with_id("main-tray")
@@ -148,8 +196,10 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
             }
             "board" => open_board_window(app),
             "market" => open_market_window(app),
+            "settings" => open_settings_window(app),
             "quit" => {
                 app.state::<HarnessSupervisor>().shutdown();
+                app.state::<CodexManager>().shutdown();
                 app.exit(0);
             }
             _ => {}
@@ -181,6 +231,10 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 fn is_allowed_navigation(url: &Url) -> bool {
     match url.scheme() {
         "tauri" => true,
+        // WebView2 exposes bundled Tauri assets through this synthetic HTTP
+        // origin on Windows. It is not an external website and must never be
+        // handed to the system browser.
+        "http" if url.host_str() == Some("tauri.localhost") => true,
         "http" | "https" => matches!(url.host_str(), Some("127.0.0.1") | Some("localhost")),
         _ => false,
     }
@@ -210,11 +264,39 @@ mod tests {
 
     #[test]
     fn allows_tauri_and_loopback_only() {
-        assert!(is_allowed_navigation(&Url::parse("tauri://localhost/index.html").unwrap()));
-        assert!(is_allowed_navigation(&Url::parse("http://127.0.0.1:8298/").unwrap()));
-        assert!(is_allowed_navigation(&Url::parse("http://localhost:3080/").unwrap()));
-        assert!(!is_allowed_navigation(&Url::parse("https://example.com/").unwrap()));
-        assert!(!is_allowed_navigation(&Url::parse("https://github.com/x/y").unwrap()));
-        assert!(!is_allowed_navigation(&Url::parse("file:///etc/passwd").unwrap()));
+        assert!(is_allowed_navigation(
+            &Url::parse("tauri://localhost/index.html").unwrap()
+        ));
+        assert!(is_allowed_navigation(
+            &Url::parse("http://tauri.localhost/index.html").unwrap()
+        ));
+        assert!(is_allowed_navigation(
+            &Url::parse("http://127.0.0.1:8298/").unwrap()
+        ));
+        assert!(is_allowed_navigation(
+            &Url::parse("http://localhost:3080/").unwrap()
+        ));
+        assert!(!is_allowed_navigation(
+            &Url::parse("https://example.com/").unwrap()
+        ));
+        assert!(!is_allowed_navigation(
+            &Url::parse("https://github.com/x/y").unwrap()
+        ));
+        assert!(!is_allowed_navigation(
+            &Url::parse("https://tauri.localhost.evil.example/").unwrap()
+        ));
+        assert!(!is_allowed_navigation(
+            &Url::parse("file:///etc/passwd").unwrap()
+        ));
+    }
+
+    #[test]
+    fn loopback_codex_acl_allows_backend_selection() {
+        let permission = include_str!("../permissions/dsh-web-codex.toml");
+        assert!(permission.contains("\"backend_select\""));
+        assert!(permission.contains("\"codex_model_catalog\""));
+        assert!(permission.contains("\"codex_collaboration_mode_catalog\""));
+        assert!(permission.contains("\"codex_session_index\""));
+        assert!(permission.contains("\"codex_session_goal_update\""));
     }
 }
